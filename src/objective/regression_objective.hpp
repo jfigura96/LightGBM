@@ -761,3 +761,55 @@ class RegressionTweedieLoss: public RegressionPoissonLoss {
 
 }  // namespace LightGBM
 #endif   // LightGBM_OBJECTIVE_REGRESSION_OBJECTIVE_HPP_
+
+
+class RegressionMAEAndBias : public ObjectiveFunction {
+ public:
+  explicit RegressionMAEAndBias(const Config& config)
+      : deterministic_(config.deterministic) {}
+
+  explicit RegressionMAEAndBias(const std::vector<std::string>& strs)
+      : deterministic_(false) {}
+
+  ~RegressionMAEAndBias() {}
+
+  void Init(const Metadata& metadata, data_size_t num_data) override {
+    num_data_ = num_data;
+    label_ = metadata.label();
+    weights_ = metadata.weights();
+  }
+
+  void GetGradients(const double* score, score_t* gradients,
+                    score_t* hessians) const override {
+    // Compute the gradients for MAE + Absolute Bias
+    if (weights_ == nullptr) {
+      #pragma omp parallel for num_threads(OMP_NUM_THREADS()) schedule(static)
+      for (data_size_t i = 0; i < num_data_; ++i) {
+        double error = score[i] - label_[i];
+        // MAE gradient
+        gradients[i] = (error > 0 ? 1.0 : -1.0) + (error > 0 ? 0.0 : (error < 0 ? -1.0 : 0.0));
+        // Hessians are constant for MAE
+        hessians[i] = 0.0; 
+      }
+    } else {
+      #pragma omp parallel for num_threads(OMP_NUM_THREADS()) schedule(static)
+      for (data_size_t i = 0; i < num_data_; ++i) {
+        double error = score[i] - label_[i];
+        // MAE gradient with weights
+        gradients[i] = (error > 0 ? weights_[i] : -weights_[i]);
+        // Hessians are constant for MAE
+        hessians[i] = 0.0; 
+      }
+    }
+  }
+
+  const char* GetName() const override {
+    return "mae_and_bias";
+  }
+
+ private:
+  bool deterministic_;
+  const double* label_;
+  const double* weights_;
+  data_size_t num_data_;
+};
